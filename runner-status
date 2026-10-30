@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# runner-status: what your self-hosted GitHub Actions runners are doing,
+# from GitHub's side and from each runner's own logs, side by side.
+# Read-only on both sides. Needs gh (logged in), jq and ssh.
+set -uo pipefail
+
+ROOT=$(cd "$(dirname "$0")" && pwd -P)
+CONFIG=${RUNNER_STATUS_CONFIG:-$HOME/.config/runner-status/config.json}
+
+usage() {
+  cat <<EOF
+usage: runner-status [-w [seconds]] [--json | --oneline] [--no-color]
+
+  (no options)  print the status screen once
+  -w [seconds]  keep refreshing (default every 10 seconds); Ctrl-C to stop
+  --json        print the status model as JSON, for scripts and menu bars
+  --oneline     print one summary line, e.g. "OK 2/2 online, 1 busy"
+  --no-color    no ANSI colors
+
+Exit status: 0 ok, 1 warn, 2 down, 64 usage or setup error.
+Config: \$RUNNER_STATUS_CONFIG, else ~/.config/runner-status/config.json
+EOF
+}
+
+mode=text watch=0 interval=10 color=auto
+while [ $# -gt 0 ]; do
+  case $1 in
+    -w|--watch)
+      watch=1
+      case ${2:-} in ''|-*) ;; *) interval=$2; shift ;; esac ;;
+    --json) mode=json ;;
+    --oneline) mode=oneline ;;
+    --no-color) color=never ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 64 ;;
+  esac
+  shift
+done
+
+for tool in gh jq ssh; do
+  command -v $tool >/dev/null || { echo "runner-status: $tool is required" >&2; exit 64; }
+done
+[ -f "$CONFIG" ] || { echo "runner-status: no config at $CONFIG (start from config.example.json)" >&2; exit 64; }
+repo=$(jq -re '.repo' "$CONFIG") || { echo "runner-status: config needs \"repo\": \"owner/name\"" >&2; exit 64; }
+if [ "$color" = auto ]; then [ -t 1 ] && color=1 || color=0; else color=0; fi
+
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=5)
+
+# probe <index> <outfile>: run lib/probe.sh on runner <index>, save key=value lines.
+probe() {
+  local i=$1 out=$2 host wsl dir b64 before rc
+  host=$(jq -r ".runners[$i].ssh" "$CONFIG")
+  wsl=$(jq -r ".runners[$i].wsl // empty" "$CONFIG")
+  dir=$(jq -r ".runners[$i].dir // empty" "$CONFIG")
+  b64=$({ printf 'RUNNER_DIR=%q\n' "$dir"; cat "$ROOT/lib/probe.sh"; } | base64 | tr -d '\n')
+  before=$(date +%s)
+  if [ -n "$wsl" ]; then
+    # Windows host: the SSH shell is cmd.exe, so the script travels as base64
+    # and wsl.exe output is UTF-16-ish; strip NULs and CRs.
+    ssh "${SSH_OPTS[@]}" "$host" "wsl -d $wsl -- bash -c \"echo $b64 | base64 -d | bash\"" 2>/dev/null \
+      | tr -d '\000\r' > "$out.tmp"
+    rc=${PIPESTATUS[0]}
+  else
+    ssh "${SSH_OPTS[@]}" "$host" "echo $b64 | base64 -d | bash" > "$out.tmp" 2>/dev/null
+    rc=$?
+  fi
+  { cat "$out.tmp"; echo "ssh_rc=$rc"; echo "local_before=$before"; echo "local_after=$(date +%s)"; } > "$out"
+  rm -f "$out.tmp"
+}
+
+# collect: print the status model as JSON.
+collect() {
+  local tmp n i id gherr=""
+  tmp=$(mktemp -d)
+  n=$(jq '.runners | length' "$CONFIG")
+  for ((i = 0; i < n; i++)); do probe $i "$tmp/probe.$i" & done
+
+  gh api "repos/$repo/actions/runners" > "$tmp/runners.json" 2> "$tmp/gh.err" \
+    || { gherr=$(head -1 "$tmp/gh.err"); echo '{}' > "$tmp/runners.json"; }
+  for s in queued in_progress; do
+    gh api "repos/$repo/actions/runs?status=$s&per_page=20" --jq '.workflow_runs[].id' 2>/dev/null
+  done | sort -u > "$tmp/run_ids"
+  while read -r id; do
+    gh api "repos/$repo/actions/runs/$id/jobs" \
+      --jq '[.jobs[] | select(.status != "completed") | {run_id, name, status, created_at, runner_name}]' 2>/dev/null
+  done < "$tmp/run_ids" | jq -s 'add // []' > "$tmp/jobs.json"
+  wait
+
+  for ((i = 0; i < n; i++)); do
+    jq -Rs --arg name "$(jq -r ".runners[$i].name" "$CONFIG")" \
+      '{name: $name, probe: (split("\n") | map(capture("^(?<key>[a-z_0-9]+)=(?<value>.*)$")) | from_entries)}' \
+      "$tmp/probe.$i"
+  done | jq -s . > "$tmp/hosts.json"
+
+  jq -n --arg repo "$repo" --argjson now "$(date +%s)" --arg gherr "$gherr" \
+    --slurpfile gh "$tmp/runners.json" --slurpfile jobs "$tmp/jobs.json" --slurpfile hosts "$tmp/hosts.json" \
+    '$gh[0] as $gh | $jobs[0] as $jobs | $hosts[0] as $hosts | '"$(cat "$ROOT/lib/model.jq")"
+  rm -rf "$tmp"
+}
+
+show() {  # show <model json>: print in the chosen mode, return the state's exit code
+  case $mode in
+    json) printf '%s\n' "$1" ;;
+    oneline) jq -r '"\(.state | ascii_upcase) \(.summary)"' <<< "$1" ;;
+    text) jq -r --arg color "$color" -f "$ROOT/lib/render.jq" <<< "$1" ;;
+  esac
+  case $(jq -r .state <<< "$1") in ok) return 0 ;; warn) return 1 ;; *) return 2 ;; esac
+}
+
+if [ $watch = 1 ]; then
+  while :; do
+    model=$(collect)
+    screen=$(show "$model")
+    printf '\033[H\033[2J%s\n' "$screen"
+    [ "$mode" = text ] && printf '\n\033[2mrefreshing every %ss · Ctrl-C to stop\033[0m\n' "$interval"
+    sleep "$interval"
+  done
+fi
+
+show "$(collect)"

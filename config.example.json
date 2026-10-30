@@ -1,0 +1,8 @@
+{
+  "repo": "your-account/your-private-repo",
+  "runners": [
+    { "name": "runner-1", "ssh": "runner-1.local" },
+    { "name": "runner-2", "ssh": "windows-box", "wsl": "Ubuntu-24.04" },
+    { "name": "runner-3", "ssh": "runner-3", "dir": "/opt/actions-runner" }
+  ]
+}
