@@ -49,7 +49,9 @@ def issue($level; $text): {level: $level, text: $text};
       ]
   ] as $runners
 | [ $jobs[] as $j
-    | ($runners | map(select(.host.run_id == ($j.run_id | tostring))) | first) as $r
+    # A run can have several jobs: prefer the runner GitHub names, then a busy one.
+    | ($runners | map(select(.host.run_id == ($j.run_id | tostring)))
+                | sort_by(.name != $j.runner_name, .host.busy != true) | first) as $r
     | {run_id: $j.run_id, name: $j.name, status: $j.status, created_at: $j.created_at,
        runner: $j.runner_name, age_s: age($j.created_at),
        # What the runner that took this run says, whatever GitHub shows.
@@ -58,13 +60,18 @@ def issue($level; $text): {level: $level, text: $text};
                                result: (if $r.host.busy then null else $r.host.last_result end)}
                    else null end)}
     | .issues = [
-        (if .status != "queued" or .age_s <= 20 then empty
-         elif .on_runner.busy == true
-         then issue("warn"; "GitHub shows \(.name) (run \(.run_id)) queued, but \(.on_runner.name) has been running it since \(.on_runner.started | hhmm)")
-         elif .on_runner
-         then issue("warn"; "GitHub shows \(.name) (run \(.run_id)) queued, but \(.on_runner.name) finished it at \(.on_runner.finished | hhmm) (\(.on_runner.result))")
-         elif .age_s > 60
-         then issue("warn"; "\(.name) (run \(.run_id)) queued \(.age_s | dur) with no runner on it")
+        (if .status == "queued" and .age_s > 20 then
+           if .on_runner.busy == true
+           then issue("warn"; "GitHub shows \(.name) (run \(.run_id)) queued, but \(.on_runner.name) has been running it since \(.on_runner.started | hhmm)")
+           elif .on_runner
+           then issue("warn"; "GitHub shows \(.name) (run \(.run_id)) queued, but \(.on_runner.name) finished it at \(.on_runner.finished | hhmm) (\(.on_runner.result))")
+           elif .age_s > 60
+           then issue("warn"; "\(.name) (run \(.run_id)) queued \(.age_s | dur) with no runner on it")
+           else empty end
+         elif .status == "in_progress" and .on_runner.busy == false
+              and (.runner == null or .runner == .on_runner.name)
+              and (age(.on_runner.finished) // 0) > 20
+         then issue("warn"; "GitHub shows \(.name) (run \(.run_id)) in progress, but \(.on_runner.name) finished it at \(.on_runner.finished | hhmm) (\(.on_runner.result))")
          else empty end)
       ]
   ] as $jobs

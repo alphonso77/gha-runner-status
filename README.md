@@ -34,7 +34,7 @@ Then it raises an issue when:
 
 - a runner is offline or missing in GitHub, unreachable over SSH, or its service isn't active
 - GitHub and the runner disagree about busy/idle for more than 20 seconds
-- GitHub shows a job queued that a runner is running or has already finished
+- GitHub shows a job queued, or in progress, that a runner is running or has already finished
 - a job has been queued over a minute and no runner has it
 - a runner's clock is more than 5 seconds off
 
@@ -90,6 +90,11 @@ The script is built so a menu-bar app can wrap it without changes:
 - The exit status gives the color without parsing anything.
 
 A [SwiftBar](https://github.com/swiftbar/SwiftBar) or [xbar](https://xbarapp.com) plugin would be a few lines calling those. Menu-bar apps start with a minimal `PATH`, so a plugin needs to add the directories holding `gh` and `jq` (on Apple silicon Homebrew, `/opt/homebrew/bin`).
+
+
+## Tests
+
+`tests/model-test.sh` runs made-up GitHub and runner states through `lib/model.jq` and checks the issues raised. No network needed.
 
 ## Related
 

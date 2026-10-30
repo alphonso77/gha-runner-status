@@ -40,8 +40,8 @@ def pad($n): tostring | . + (" " * ([$n - length, 0] | max));
        "", c("1") + "Jobs" + reset,
        (.jobs[] | "  \(.name)  run \(.run_id)  \(.status) \(.age_s | dur)"
                   + (if .runner then " on \(.runner)" else "" end)
-                  + (if .on_runner == null or .status != "queued" then ""
-                     elif .on_runner.busy then dim("  (\(.on_runner.name) is running it)")
+                  + (if .on_runner == null then ""
+                     elif .on_runner.busy then (if .status == "queued" then dim("  (\(.on_runner.name) is running it)") else "" end)
                      else dim("  (\(.on_runner.name) finished it: \(.on_runner.result))") end))
      else empty end),
     (if (.issues | length) > 0 then
