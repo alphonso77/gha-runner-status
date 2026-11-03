@@ -4,7 +4,13 @@
 # Read-only on both sides. Needs gh (logged in), jq and ssh.
 set -uo pipefail
 
-ROOT=$(cd "$(dirname "$0")" && pwd -P)
+# Follow symlinks (e.g. ~/.local/bin/runner-status) back to the checkout.
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
+done
+ROOT=$(cd "$(dirname "$self")" && pwd -P)
 CONFIG=${RUNNER_STATUS_CONFIG:-$HOME/.config/runner-status/config.json}
 
 usage() {

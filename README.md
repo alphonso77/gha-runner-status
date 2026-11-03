@@ -48,6 +48,9 @@ mkdir -p ~/.config/runner-status
 cp gha-runner-status/config.example.json ~/.config/runner-status/config.json
 # edit it: your repo and runners
 gha-runner-status/runner-status
+
+# optional: put it on your PATH
+ln -s "$PWD/gha-runner-status/runner-status" ~/.local/bin/runner-status
 ```
 
 ### config.json
