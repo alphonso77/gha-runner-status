@@ -84,17 +84,23 @@ runner-status --json       # the full status model
 
 Exit status is `0` ok, `1` warn, `2` down, `64` for a usage or setup error.
 
-## Menu bar (planned)
+## Menu bar (macOS)
 
-The script is built so a menu-bar app can wrap it without changes:
+`menubar/runner-status.30s.sh` is a [SwiftBar](https://swiftbar.app) plugin. It refreshes every 30 seconds (the `.30s` in the name) and shows:
 
-- `--oneline` gives a title: the state (`OK`, `WARN`, `DOWN`) and a short summary.
-- `--json` gives everything else: `state`, `summary`, `runners[]` (each with `github`, `host` and `issues`), `jobs[]` and a flat `issues[]` list with `level` and `text`.
-- The exit status gives the color without parsing anything.
+- in the menu bar: a check mark when all is well (plus "1 busy" while a job runs), an orange triangle with the issue count on a warning, a red stop sign when a runner is down
+- in the menu: each runner's GitHub and runner-side state, unfinished jobs (click to open the run), the issues, and shortcuts to GitHub Actions, a live `runner-status -w` in Terminal, and a manual refresh
 
-A [SwiftBar](https://github.com/swiftbar/SwiftBar) or [xbar](https://xbarapp.com) plugin would be a few lines calling those. Menu-bar apps start with a minimal `PATH`, so a plugin needs to add the directories holding `gh` and `jq` (on Apple silicon Homebrew, `/opt/homebrew/bin`).
+Set it up:
 
+```sh
+brew install --cask swiftbar      # first launch asks you to pick a plugin folder
+ln -s "$PWD/gha-runner-status/menubar/runner-status.30s.sh" "<your SwiftBar plugin folder>/"
+```
 
+The plugin finds `runner-status` by following its own symlink back to the checkout (set `RUNNER_STATUS_BIN` to override), and adds `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin` to `PATH`, since menu-bar apps start with a minimal one. It should also work in [xbar](https://xbarapp.com), apart from the SF Symbol icons.
+
+For other wrappers: `--oneline` prints a title like `WARN 2/2 online, 0 busy, 1 issue`, `--json` prints the full model (`state`, `summary`, `runners[]`, `jobs[]`, `issues[]` with `level` and `text`), and the exit status is `0` ok, `1` warn, `2` down.
 ## Tests
 
 `tests/model-test.sh` runs made-up GitHub and runner states through `lib/model.jq` and checks the issues raised. No network needed.
